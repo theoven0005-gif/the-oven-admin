@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(){ return request.auth != null; }
+    function admin(){ return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+
+    // Orders: admins full control; customers read/create their own.
+    match /orders/{id} {
+      allow read: if admin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update: if admin();
+    }
+
+    // Customer accounts: admins can read; customers manage their own.
+    match /users/{uid} {
+      allow read: if admin() || (signedIn() && uid == request.auth.uid);
+      allow create, update: if signedIn() && uid == request.auth.uid;
+    }
+
+    // Admin push tokens (used by Cloud Functions for order alerts).
+    match /adminDevices/{uid} {
+      allow read, write: if admin() && uid == request.auth.uid;
+    }
+
+    // Notification audit log: readable by admins/customers (own), written/deleted by admins.
+    match /notifications/{id} {
+      allow read: if admin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow create, update: if admin();
+      allow delete: if admin();
+    }
+
+    // Menu items, categories, banners: public read for signed-in app users, admin write.
+    match /menuItems/{id} { allow read: if signedIn(); allow write: if admin(); }
+    match /categories/{id} { allow read: if signedIn(); allow write: if admin(); }
+    match /banners/{id} { allow read: if signedIn(); allow write: if admin(); }
+
+    // Restaurant settings doc: settings/restaurant.
+    match /settings/{id} {
+      allow read: if signedIn();
+      allow write: if admin();
+    }
+
+    // Feedback: customers can file their own, admins manage.
+    match /feedback/{id} {
+      allow read: if admin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update, delete: if admin();
+    }
+
+    // Admin allowlist: readable only by the admin themselves; only created via console.
+    match /admins/{uid} {
+      allow read: if admin() && uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
